@@ -90,6 +90,7 @@ def safe_normalize(v):
     return v / n
 
 @ti.func
+#施密特正交化
 def orthonormalize(R):
     x = ti.Vector([R[0, 0], R[1, 0], R[2, 0]])
     y = ti.Vector([R[0, 1], R[1, 1], R[2, 1]])
