@@ -76,6 +76,34 @@ def init_rigid_bodies():
     # modify the code to support more complex demos
     #########
 
+@ti.func
+def skew(w):
+    return ti.Matrix([
+        [0.0,   -w[2],  w[1]],
+        [w[2],   0.0,  -w[0]],
+        [-w[1],  w[0],  0.0]
+    ])
+
+@ti.func
+def safe_normalize(v):
+    n = ti.sqrt(v.dot(v) + 1e-12)
+    return v / n
+
+@ti.func
+def orthonormalize(R):
+    x = ti.Vector([R[0, 0], R[1, 0], R[2, 0]])
+    y = ti.Vector([R[0, 1], R[1, 1], R[2, 1]])
+    x = safe_normalize(x)
+    y = y - x * x.dot(y)
+    y = safe_normalize(y)
+    z = x.cross(y)
+
+    return ti.Matrix([
+        [x[0], y[0], z[0]],
+        [x[1], y[1], z[1]],
+        [x[2], y[2], z[2]],
+    ])
+
 
 @ti.kernel
 def integrate():
