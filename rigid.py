@@ -119,7 +119,6 @@ def integrate():
         w=angular_velocity[i]
         R += skew(w) @ R * DT
         rotation[i] = orthonormalize(R)
-    #########
     return
 
 
