@@ -225,7 +225,6 @@ def resolve_collision_fixed(i: int, j: int, normal: np.ndarray, penetration: flo
     """冲量法碰撞响应 + 位置修正"""
     #########
     # add your code here to update position, velocity, and so on.
-    
     #########
 
 @ti.kernel
