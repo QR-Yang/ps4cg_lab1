@@ -112,6 +112,13 @@ def integrate():
     #########
     # add your code here  
     # you may need some tool functions, e.g., skew(...)
+    for i in range(N_BODIES):
+        velocity[i] += GRAVITY * DT
+        position[i] += velocity[i] * DT
+        R=rotation[i]
+        w=angular_velocity[i]
+        R += skew(w) @ R * DT
+        rotation[i] = orthonormalize(R)
     #########
     return
 
