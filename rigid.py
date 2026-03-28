@@ -208,11 +208,24 @@ def collision_manifold(i: int, j: int):
 
     return True, normal, penetration, contact_point
 
+#逆惯性张量求解
+def get_inv_inertia_world(i):
+    m = float(mass[i])
+    e = half_extent[i].to_numpy().astype(np.float32)
+    I_body = np.array([
+        [(1.0 / 3.0) * m * (e[1] * e[1] + e[2] * e[2]), 0.0, 0.0],
+        [0.0, (1.0 / 3.0) * m * (e[0] * e[0] + e[2] * e[2]), 0.0],
+        [0.0, 0.0, (1.0 / 3.0) * m * (e[0] * e[0] + e[1] * e[1])],
+    ], dtype=np.float32)
+    R = rotation[i].to_numpy().astype(np.float32)
+    I_body_inv = np.linalg.inv(I_body)
+    return R @ I_body_inv @ R.T
 
 def resolve_collision_fixed(i: int, j: int, normal: np.ndarray, penetration: float, contact: np.ndarray):
     """冲量法碰撞响应 + 位置修正"""
     #########
     # add your code here to update position, velocity, and so on.
+    
     #########
 
 @ti.kernel
