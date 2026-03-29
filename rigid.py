@@ -270,7 +270,6 @@ def resolve_collision_fixed(i: int, j: int, normal: np.ndarray, penetration: flo
     angular_velocity[j] = ti.Vector(wj)
     velocity[i] = ti.Vector(vi)
     velocity[j] = ti.Vector(vj)
-    #########
 
 @ti.kernel
 def update_mesh_vertices():
