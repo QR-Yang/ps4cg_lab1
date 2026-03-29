@@ -225,8 +225,51 @@ def resolve_collision_fixed(i: int, j: int, normal: np.ndarray, penetration: flo
     """冲量法碰撞响应 + 位置修正"""
     #########
     # add your code here to update position, velocity, and so on.
-
-    
+    pi=position[i].to_numpy()
+    pj=position[j].to_numpy()
+    vi=velocity[i].to_numpy()
+    vj=velocity[j].to_numpy()
+    mi=float(mass[i])
+    mj=float(mass[j])
+    wi=angular_velocity[i].to_numpy()
+    wj=angular_velocity[j].to_numpy()
+    inv_m_i = 1.0 / mi
+    inv_m_j = 1.0 / mj
+    inv_I_i = get_inv_inertia_world(i) #求解逆惯性张量
+    inv_I_j = get_inv_inertia_world(j)
+    ri=contact - pi
+    rj=contact - pj
+    #在这里询问ai后,采用percent和slop的方式进行位置修正,这样可以避免小抖动
+    percent = 0.8
+    slop = 0.001
+    correction_mag = max(penetration - slop, 0.0) / (inv_m_i + inv_m_j) * percent
+    correction = correction_mag * normal
+    p_i += inv_m_i * correction
+    p_j -= inv_m_j * correction
+    v_contact_i = vi + np.cross(wi, ri)
+    v_contact_j = vj + np.cross(wj, rj)
+    rel_v=v_contact_i - v_contact_j
+    vel_along_normal=np.dot(rel_v,normal)
+    if vel_along_normal > 0:#如果相对速度沿法线方向是分离的,则不处理
+        return
+    r_i_cross_n = np.cross(ri, normal)
+    r_j_cross_n = np.cross(rj, normal)
+    denom = inv_m_i + inv_m_j#等效质量倒数
+    denom += np.dot(normal,np.cross(inv_I_i @ r_i_cross_n, ri) +np.cross(inv_I_j @ r_j_cross_n, rj))
+    if denom<1e-6:
+        return
+    jn = -(1.0 + RESTITUTION) * vel_along_normal / denom
+    impulse = jn * normal
+    vi += impulse * inv_m_i
+    vj -= impulse * inv_m_j
+    wi += inv_I_i @ np.cross(ri, impulse)
+    wj -= inv_I_j @ np.cross(rj, impulse)
+    position[i] = ti.Vector(vi)
+    position[j] = ti.Vector(vj)
+    angular_velocity[i] = ti.Vector(wi)
+    angular_velocity[j] = ti.Vector(wj)
+    velocity[i] = ti.Vector(vi)
+    velocity[j] = ti.Vector(vj)
     #########
 
 @ti.kernel
