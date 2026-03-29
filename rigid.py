@@ -18,6 +18,7 @@ GRAVITY = ti.Vector([0.0, 0.0, 0.0])
 DT = 1.0 / 60.0
 RESTITUTION = 0.6
 EPSILON = 1e-6
+GROUND_RESTITUTION = 0.25#专门的地面恢复系数
 
 # 立方体单位顶点 ([-1,1]^3)，8个顶点 - 用于 Taichi kernel 和 Python
 CUBE_LOCAL_VERTICES = np.array([
@@ -244,13 +245,15 @@ def resolve_collision_fixed(i: int, j: int, normal: np.ndarray, penetration: flo
     slop = 0.001
     correction_mag = max(penetration - slop, 0.0) / (inv_m_i + inv_m_j) * percent
     correction = correction_mag * normal
-    p_i += inv_m_i * correction
-    p_j -= inv_m_j * correction
+    pi += inv_m_i * correction
+    pj -= inv_m_j * correction
     v_contact_i = vi + np.cross(wi, ri)
     v_contact_j = vj + np.cross(wj, rj)
     rel_v=v_contact_i - v_contact_j
     vel_along_normal=np.dot(rel_v,normal)
     if vel_along_normal > 0:#如果相对速度沿法线方向是分离的,则不处理
+        position[i] = ti.Vector(pi)
+        position[j] = ti.Vector(pj)
         return
     r_i_cross_n = np.cross(ri, normal)
     r_j_cross_n = np.cross(rj, normal)
@@ -264,8 +267,8 @@ def resolve_collision_fixed(i: int, j: int, normal: np.ndarray, penetration: flo
     vj -= impulse * inv_m_j
     wi += inv_I_i @ np.cross(ri, impulse)
     wj -= inv_I_j @ np.cross(rj, impulse)
-    position[i] = ti.Vector(vi)
-    position[j] = ti.Vector(vj)
+    position[i] = ti.Vector(pi)
+    position[j] = ti.Vector(pj)
     angular_velocity[i] = ti.Vector(wi)
     angular_velocity[j] = ti.Vector(wj)
     velocity[i] = ti.Vector(vi)
