@@ -343,9 +343,32 @@ def main():
             min_y = float(verts[:, 1].min())
             if min_y < 0:
                 print(i,verts)
-                #########
-                # add your code here to update position, velocity, and so on.
-                # if min_y < 0: ...
+                pi = position[i].to_numpy()
+                vi = velocity[i].to_numpy()
+                wi = angular_velocity[i].to_numpy()
+                inv_m = 1.0 / float(mass[i])
+                inv_I = get_inv_inertia_world(i)
+                pi[1] -= min_y
+                ids = np.where(np.abs(verts[:, 1] - min_y) <  1e-4)[0]
+                contact = verts[ids].mean(axis=0)
+                contact[1] = 0.0
+                normal = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+                r = contact - pi
+                v_contact = vi + np.cross(wi, r)
+                vel_along_normal = np.dot(v_contact, normal)
+                if vel_along_normal < 0.0:
+                    r_cross_n = np.cross(r, normal)
+                    denom = inv_m + np.dot(normal, np.cross(inv_I @ r_cross_n, r))
+                    if denom > 1e-6:
+                        jn = -(1.0 + GROUND_RESTITUTION) * vel_along_normal / denom
+                        impulse = jn * normal
+                        vi += impulse * inv_m
+                        wi += inv_I @ np.cross(r, impulse)
+                if abs(vi[1]) < 1e-3:
+                    vi[1] = 0.0
+                position[i] = ti.Vector(pi)
+                velocity[i] = ti.Vector(vi)
+                angular_velocity[i] = ti.Vector(wi)
                 #########
 
 
