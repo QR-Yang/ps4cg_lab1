@@ -11,10 +11,10 @@ import numpy as np
 ti.init(arch=ti.gpu, default_fp=ti.f32)
 
 # 常量
-# 这里只做两个方块的对撞测试
-N_BODIES = 2
-# 取消重力，只保留水平运动
-GRAVITY = ti.Vector([0.0, 0.0, 0.0])
+# 这里做四个方块的物理测试
+N_BODIES = 4
+# 加上重力
+GRAVITY = ti.Vector([0.0, -9.8, 0.0])
 DT = 1.0 / 60.0
 RESTITUTION = 0.6
 EPSILON = 1e-6
@@ -71,6 +71,22 @@ def init_rigid_bodies():
     angular_velocity[1] = ti.Vector([0.0, 0.0, 0.0])
     half_extent[1] = ti.Vector([0.3, 0.3, 0.3])
     mass[1] = 1.0
+
+    # 立方体 2：下落并带旋转
+    position[2] = ti.Vector([0.0, 3.0, 0.0])
+    velocity[2] = ti.Vector([0.0, 0.0, 0.0])
+    rotation[2] = ti.Matrix.identity(ti.f32, 3)
+    angular_velocity[2] = ti.Vector([5.0, 0.0, 0.0])
+    half_extent[2] = ti.Vector([0.3, 0.3, 0.3])
+    mass[2] = 1.0
+
+    # 立方体 3：下落并带旋转
+    position[3] = ti.Vector([0.2, 5.0, 0.1])
+    velocity[3] = ti.Vector([0.0, 0.0, 0.0])
+    rotation[3] = ti.Matrix.identity(ti.f32, 3)
+    angular_velocity[3] = ti.Vector([0.0, 5.0, 0.0])
+    half_extent[3] = ti.Vector([0.4, 0.4, 0.4])
+    mass[3] = 1.0
 
     #########
     # This is an example of two rigid boxes
@@ -290,6 +306,9 @@ def update_mesh_vertices():
             for v in range(3):
                 mesh_indices[i * 36 + t * 3 + v] = i * 8 + cube_indices_ti[t * 3 + v]
 
+@ti.kernel
+def apply_force(body_id: ti.i32, fx: ti.f32, fy: ti.f32, fz: ti.f32):
+    velocity[body_id] += ti.Vector([fx, fy, fz]) * (DT / mass[body_id])
 
 def main():
     init_rigid_bodies()
@@ -305,7 +324,7 @@ def main():
     scene.ambient_light((0.6, 0.6, 0.6))
     scene.point_light((5, 5, 5), (1.2, 1.2, 1.2))
 
-    colors = [(0.8, 0.2, 0.2), (0.2, 0.6, 0.8), (0.3, 0.8, 0.3)]
+    colors = [(0.8, 0.2, 0.2), (0.2, 0.6, 0.8), (0.3, 0.8, 0.3), (0.8, 0.8, 0.2)]
 
     # --------------------------
     # 创建地板
@@ -326,7 +345,28 @@ def main():
     floor_indices_ti.from_numpy(floor_indices)
     # --------------------------
 
+    drag_last_pos = None
+    drag_target = -1
+
     while window.running:
+        if window.is_pressed(ti.ui.LMB):
+            mx, my = window.get_cursor_pos()
+            if drag_last_pos is not None:
+                dx = mx - drag_last_pos[0]
+                dy = my - drag_last_pos[1]
+                fx = dx * 500.0
+                fz = -dy * 500.0
+                if drag_target == 0:
+                    apply_force(0, fx, 0.0, fz)
+                elif drag_target == 1:
+                    apply_force(1, fx, 0.0, fz)
+            else:
+                drag_target = 0 if mx < 0.5 else 1
+            drag_last_pos = (mx, my)
+        else:
+            drag_last_pos = None
+            drag_target = -1
+
         for _ in range(2):  # 子步提高稳定性
             integrate()
             ti.sync()

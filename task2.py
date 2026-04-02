@@ -290,6 +290,9 @@ def update_mesh_vertices():
             for v in range(3):
                 mesh_indices[i * 36 + t * 3 + v] = i * 8 + cube_indices_ti[t * 3 + v]
 
+@ti.kernel
+def apply_force(body_id: ti.i32, fx: ti.f32, fy: ti.f32, fz: ti.f32):
+    velocity[body_id] += ti.Vector([fx, fy, fz]) * (DT / mass[body_id])
 
 def main():
     init_rigid_bodies()
@@ -326,7 +329,28 @@ def main():
     floor_indices_ti.from_numpy(floor_indices)
     # --------------------------
 
+    drag_last_pos = None
+    drag_target = -1
+
     while window.running:
+        if window.is_pressed(ti.ui.LMB):
+            mx, my = window.get_cursor_pos()
+            if drag_last_pos is not None:
+                dx = mx - drag_last_pos[0]
+                dy = my - drag_last_pos[1]
+                fx = dx * 50.0
+                fz = -dy * 50.0
+                if drag_target == 0:
+                    apply_force(0, fx, 0.0, fz)
+                elif drag_target == 1:
+                    apply_force(1, fx, 0.0, fz)
+            else:
+                drag_target = 0 if mx < 0.5 else 1
+            drag_last_pos = (mx, my)
+        else:
+            drag_last_pos = None
+            drag_target = -1
+
         for _ in range(2):  # 子步提高稳定性
             integrate()
             ti.sync()

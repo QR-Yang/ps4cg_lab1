@@ -11,8 +11,8 @@ import numpy as np
 ti.init(arch=ti.gpu, default_fp=ti.f32)
 
 # 常量
-# 这里只做两个方块的对撞测试
-N_BODIES = 2
+# 这里只做单个方块的对撞测试
+N_BODIES = 1
 # 取消重力，只保留水平运动
 GRAVITY = ti.Vector([0.0, 0.0, 0.0])
 DT = 1.0 / 60.0
@@ -58,19 +58,11 @@ def init_rigid_bodies():
     """初始化 2 个立方体做对撞，无重力"""
     # 立方体 0：左边，向右运动
     position[0] = ti.Vector([-1.0, 0.75, 0.2])
-    velocity[0] = ti.Vector([1.0, 0.0, 0.0])
+    velocity[0] = ti.Vector([0.1, 0.0, 0.0])
     rotation[0] = ti.Matrix.identity(ti.f32, 3)
     angular_velocity[0] = ti.Vector([0.0, 0.0, 0.0])
     half_extent[0] = ti.Vector([0.3, 0.3, 0.3])
     mass[0] = 1.0
-
-    # 立方体 1：右边，向左运动
-    position[1] = ti.Vector([1.0, 0.5, 0.0])
-    velocity[1] = ti.Vector([-1.0, 0.0, 0.0])
-    rotation[1] = ti.Matrix.identity(ti.f32, 3)
-    angular_velocity[1] = ti.Vector([0.0, 0.0, 0.0])
-    half_extent[1] = ti.Vector([0.3, 0.3, 0.3])
-    mass[1] = 1.0
 
     #########
     # This is an example of two rigid boxes
@@ -290,6 +282,9 @@ def update_mesh_vertices():
             for v in range(3):
                 mesh_indices[i * 36 + t * 3 + v] = i * 8 + cube_indices_ti[t * 3 + v]
 
+@ti.kernel
+def apply_force(body_id: ti.i32, fx: ti.f32, fy: ti.f32, fz: ti.f32):
+    velocity[body_id] += ti.Vector([fx, fy, fz]) * (DT / mass[body_id])
 
 def main():
     init_rigid_bodies()
@@ -326,7 +321,21 @@ def main():
     floor_indices_ti.from_numpy(floor_indices)
     # --------------------------
 
+    drag_last_pos = None
+
     while window.running:
+        if window.is_pressed(ti.ui.LMB):
+            mx, my = window.get_cursor_pos()
+            if drag_last_pos is not None:
+                dx = mx - drag_last_pos[0]
+                dy = my - drag_last_pos[1]
+                fx = dx * 50.0
+                fz = -dy * 50.0
+                apply_force(0, fx, 0.0, fz)
+            drag_last_pos = (mx, my)
+        else:
+            drag_last_pos = None
+
         for _ in range(2):  # 子步提高稳定性
             integrate()
             ti.sync()
