@@ -338,8 +338,8 @@ def main():
             if drag_last_pos is not None:
                 dx = mx - drag_last_pos[0]
                 dy = my - drag_last_pos[1]
-                fx = dx * 50.0
-                fz = -dy * 50.0
+                fx = dx * 200.0
+                fz = -dy * 200.0
                 if drag_target == 0:
                     apply_force(0, fx, 0.0, fz)
                 elif drag_target == 1:

@@ -15,10 +15,23 @@ ti.init(arch=ti.gpu, default_fp=ti.f32)
 N_BODIES = 4
 # 加上重力
 GRAVITY = ti.Vector([0.0, -9.8, 0.0])
-DT = 1.0 / 60.0
-RESTITUTION = 0.6
+FRAME_DT = 1.0 / 60.0
+SUBSTEPS = 2
+SOLVER_ITERS = 2
+DT = FRAME_DT / SUBSTEPS
+LINEAR_DAMPING = 0.99999
+ANGULAR_DAMPING = 0.99998
+RESTITUTION = 0.20
 EPSILON = 1e-6
-GROUND_RESTITUTION = 0.25#专门的地面恢复系数
+GROUND_RESTITUTION = 0.05
+GROUND_PENETRATION_SLOP = 1e-4
+GROUND_BAUMGARTE = 0.35
+GROUND_SLEEP_LINEAR = 0.08
+GROUND_SLEEP_ANGULAR = 0.10
+GROUND_SLEEP_MIN_Y = 0.01
+POSITION_SLOP = 1e-3
+POSITION_PERCENT = 0.60
+DRAG_FORCE_SCALE = 5000.0
 
 # 立方体单位顶点 ([-1,1]^3)，8个顶点 - 用于 Taichi kernel 和 Python
 CUBE_LOCAL_VERTICES = np.array([
@@ -131,6 +144,9 @@ def integrate():
     # you may need some tool functions, e.g., skew(...)
     for i in range(N_BODIES):
         velocity[i] += GRAVITY * DT
+        velocity[i] *= LINEAR_DAMPING
+        angular_velocity[i] *= ANGULAR_DAMPING
+        
         position[i] += velocity[i] * DT
         R=rotation[i]
         w=angular_velocity[i]
@@ -257,8 +273,8 @@ def resolve_collision_fixed(i: int, j: int, normal: np.ndarray, penetration: flo
     ri=contact - pi
     rj=contact - pj
     #在这里询问ai后,采用percent和slop的方式进行位置修正,这样可以避免小抖动
-    percent = 0.8
-    slop = 0.001
+    percent = POSITION_PERCENT
+    slop = POSITION_SLOP
     correction_mag = max(penetration - slop, 0.0) / (inv_m_i + inv_m_j) * percent
     correction = correction_mag * normal
     pi += inv_m_i * correction
@@ -308,7 +324,53 @@ def update_mesh_vertices():
 
 @ti.kernel
 def apply_force(body_id: ti.i32, fx: ti.f32, fy: ti.f32, fz: ti.f32):
-    velocity[body_id] += ti.Vector([fx, fy, fz]) * (DT / mass[body_id])
+    velocity[body_id] += ti.Vector([fx, fy, fz]) * (FRAME_DT / mass[body_id])
+def resolve_ground(i: int):
+    verts = get_box_vertices_correct(i)
+    ys = verts[:, 1]
+    min_y = float(np.min(ys))
+    if min_y >= 0.0:
+        return
+    p = position[i].to_numpy().astype(np.float32)
+    v = velocity[i].to_numpy().astype(np.float32)
+    w = angular_velocity[i].to_numpy().astype(np.float32)
+    inv_m = 1.0 / float(mass[i])
+    inv_I = get_inv_inertia_world(i)
+    normal = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+    ids = np.where(np.abs(ys - min_y) < 1e-4)[0]
+    if len(ids) == 0:
+        contact = verts[np.argmin(ys)].copy()
+    else:
+        contact = verts[ids].mean(axis=0).astype(np.float32)
+    contact[1] = 0.0
+    penetration = -min_y
+    correction = max(penetration - GROUND_PENETRATION_SLOP, 0.0) * GROUND_BAUMGARTE
+    p[1] += correction
+    r = contact - p
+    v_contact = v + np.cross(w, r)
+    vel_along_normal = np.dot(v_contact, normal)
+    if vel_along_normal < 0.0:
+        r_cross_n = np.cross(r, normal)
+        denom = inv_m + np.dot(normal, np.cross(inv_I @ r_cross_n, r))
+
+        if denom > 1e-8 and np.isfinite(denom):
+            jn = -(1.0 + GROUND_RESTITUTION) * vel_along_normal / denom
+            impulse = jn * normal
+            v += impulse * inv_m
+            w += inv_I @ np.cross(r, impulse)
+    v[0] *= 0.999
+    v[2] *= 0.999
+    w *= 0.9998
+    if (
+        np.linalg.norm(v) < GROUND_SLEEP_LINEAR and
+        np.linalg.norm(w) < GROUND_SLEEP_ANGULAR and
+        abs(min_y) < GROUND_SLEEP_MIN_Y
+    ):
+        v[:] = 0.0
+        w[:] = 0.0
+    position[i] = ti.Vector(p)
+    velocity[i] = ti.Vector(v)
+    angular_velocity[i] = ti.Vector(w)
 
 def main():
     init_rigid_bodies()
@@ -324,7 +386,12 @@ def main():
     scene.ambient_light((0.6, 0.6, 0.6))
     scene.point_light((5, 5, 5), (1.2, 1.2, 1.2))
 
-    colors = [(0.8, 0.2, 0.2), (0.2, 0.6, 0.8), (0.3, 0.8, 0.3), (0.8, 0.8, 0.2)]
+    colors = [
+        (0.85, 0.25, 0.25),
+        (0.20, 0.60, 0.85),
+        (0.25, 0.80, 0.35),
+        (0.85, 0.70, 0.25),
+    ]
 
     # --------------------------
     # 创建地板
@@ -345,72 +412,51 @@ def main():
     floor_indices_ti.from_numpy(floor_indices)
     # --------------------------
 
-    drag_last_pos = None
-    drag_target = -1
+    active_target = 0
 
     while window.running:
-        if window.is_pressed(ti.ui.LMB):
-            mx, my = window.get_cursor_pos()
-            if drag_last_pos is not None:
-                dx = mx - drag_last_pos[0]
-                dy = my - drag_last_pos[1]
-                fx = dx * 500.0
-                fz = -dy * 500.0
-                if drag_target == 0:
-                    apply_force(0, fx, 0.0, fz)
-                elif drag_target == 1:
-                    apply_force(1, fx, 0.0, fz)
-            else:
-                drag_target = 0 if mx < 0.5 else 1
-            drag_last_pos = (mx, my)
-        else:
-            drag_last_pos = None
-            drag_target = -1
+        while window.get_event(ti.ui.PRESS):
+            if window.event.key == 'q':
+                active_target = 0
+            elif window.event.key == 'w':
+                active_target = 1
+            elif window.event.key == 'e':
+                active_target = 2
+            elif window.event.key == 'r':
+                active_target = 3
 
-        for _ in range(2):  # 子步提高稳定性
+        if active_target != -1:
+            fx = 0.0
+            fz = 0.0
+            move_force = 50.0
+            
+            if window.is_pressed('i'):
+                fz -= move_force  # 前
+            if window.is_pressed('k'):
+                fz += move_force  # 后
+            if window.is_pressed('j'):
+                fx -= move_force  # 左
+            if window.is_pressed('l'):
+                fx += move_force  # 右
+                
+            if fx != 0.0 or fz != 0.0:
+                apply_force(active_target, fx, 0.0, fz)
+
+        for _ in range(SUBSTEPS):
             integrate()
             ti.sync()
-            for i in range(N_BODIES):
-                for j in range(i + 1, N_BODIES):
-                    collided, normal, penetration, contact = collision_manifold(i, j)
 
-                    if collided:
-                        resolve_collision_fixed(i, j, normal, penetration, contact)
+            for _ in range(SOLVER_ITERS):
+                # 刚体-刚体
+                for i in range(N_BODIES):
+                    for j in range(i + 1, N_BODIES):
+                        collided, normal, penetration, contact = collision_manifold(i, j)
+                        if collided:
+                            resolve_collision_fixed(i, j, normal, penetration, contact)
 
-        # 地面碰撞（取 OBB 顶点最小 y）
-        for i in range(N_BODIES):
-            verts = get_box_vertices_correct(i)
-            min_y = float(verts[:, 1].min())
-            if min_y < 0:
-                print(i,verts)
-                pi = position[i].to_numpy()
-                vi = velocity[i].to_numpy()
-                wi = angular_velocity[i].to_numpy()
-                inv_m = 1.0 / float(mass[i])
-                inv_I = get_inv_inertia_world(i)
-                pi[1] -= min_y
-                ids = np.where(np.abs(verts[:, 1] - min_y) <  1e-4)[0]
-                contact = verts[ids].mean(axis=0)
-                contact[1] = 0.0
-                normal = np.array([0.0, 1.0, 0.0], dtype=np.float32)
-                r = contact - pi
-                v_contact = vi + np.cross(wi, r)
-                vel_along_normal = np.dot(v_contact, normal)
-                if vel_along_normal < 0.0:
-                    r_cross_n = np.cross(r, normal)
-                    denom = inv_m + np.dot(normal, np.cross(inv_I @ r_cross_n, r))
-                    if denom > 1e-6:
-                        jn = -(1.0 + GROUND_RESTITUTION) * vel_along_normal / denom
-                        impulse = jn * normal
-                        vi += impulse * inv_m
-                        wi += inv_I @ np.cross(r, impulse)
-                if abs(vi[1]) < 1e-3:
-                    vi[1] = 0.0
-                position[i] = ti.Vector(pi)
-                velocity[i] = ti.Vector(vi)
-                angular_velocity[i] = ti.Vector(wi)
-                #########
-
+                # 刚体-地面
+                for i in range(N_BODIES):
+                    resolve_ground(i)
 
         update_mesh_vertices()
 
